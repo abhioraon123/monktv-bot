@@ -2,30 +2,52 @@ import nest_asyncio
 nest_asyncio.apply()
 
 import logging
+import os
+import json
+import asyncio
+
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 # Enable logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Google Sheets setup
-SERVICE_ACCOUNT_FILE = 'credentials.json'
+creds_json = os.environ.get('GOOGLE_CREDS')
+creds_dict = json.loads(creds_json)
+
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+gc = gspread.authorize(credentials)
+
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SPREADSHEET_ID = '1K-Nuv4dB8_MPBvk-Jc4Qr_Haa4nW6Z8z2kbfUemYe1U'
 RANGE_NAME = 'Sheet1!A:B'
 
 # Authorize Google Sheets
+SERVICE_ACCOUNT_FILE = "credentials.json"
 creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES
 )
 sheet = build('sheets', 'v4', credentials=creds).spreadsheets()
 
 # Telegram Bot Handlers
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Welcome! Send a keyword to search.")
+    message = await update.message.reply_text(
+        "Welcome! Send a keyword to search.\n\n📺 Visit us: https://monktv.glide.page"
+    )
+    await asyncio.sleep(43200)  # 12 hours = 43,200 seconds
+    try:
+        await message.delete()
+    except:
+        pass
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.lower()
@@ -34,9 +56,24 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for row in values:
         if query in row[0].lower():
-            await update.message.reply_text(f'{row[0]}: {row[1]}')
+            message = await update.message.reply_text(
+                f'{row[0]}: {row[1]}\n\n📺 Visit us: https://monktv.glide.page'
+            )
+            await asyncio.sleep(43200)
+            try:
+                await message.delete()
+            except:
+                pass
             return
-    await update.message.reply_text("No match found.")
+
+    message = await update.message.reply_text(
+        "No match found.\n\n📺 Visit us: https://monktv.glide.page"
+    )
+    await asyncio.sleep(43200)
+    try:
+        await message.delete()
+    except:
+        pass
 
 # Main Function
 async def main():
@@ -50,8 +87,5 @@ async def main():
 
 # Run the bot
 if __name__ == "__main__":
-    import asyncio
-    import nest_asyncio
-    nest_asyncio.apply()
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
