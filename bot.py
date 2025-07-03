@@ -73,12 +73,11 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))
 
-# FastAPI startup event
+# FastAPI startup event — NO POLLING HERE ❌
 @app.on_event("startup")
 async def on_startup():
     await application.initialize()
     await application.start()
-    await application.updater.start_polling()
 
 @app.post("/")
 async def webhook(request: Request):
