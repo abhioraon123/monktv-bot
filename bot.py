@@ -4,40 +4,40 @@ nest_asyncio.apply()
 import logging
 import os
 import json
-import asyncio
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
+from oauth2client.service_account import ServiceAccountCredentials
+from fastapi import FastAPI, Request
+from telegram.ext import Application
 
-# Enable logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Google Sheets setup
+# 🔒 Credentials
 creds_json = os.environ.get('GOOGLE_CREDS')
 creds_dict = json.loads(creds_json)
-
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-gc = gspread.authorize(credentials)
-
+credentials_gspread = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+gc = gspread.authorize(credentials_gspread)
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+credentials_api = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+sheet = build('sheets', 'v4', credentials=credentials_api).spreadsheets()
 SPREADSHEET_ID = '1K-Nuv4dB8_MPBvk-Jc4Qr_Haa4nW6Z8z2kbfUemYe1U'
 RANGE_NAME = 'Sheet1!A:B'
 
-SERVICE_ACCOUNT_FILE = "credentials.json"  # dummy, not used with os.environ creds
-sheet = build('sheets', 'v4', credentials=credentials).spreadsheets()
+# 📋 Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Website link
-WEBSITE_LINK = "📺 Visit: https://monktv.glide.page"
+# 🌐 FastAPI for webhook
+app = FastAPI()
+BOT_TOKEN = "7346055162:AAEpJC6HWmnG3sywQtBw_b3-TRqM6Ka0AkA"
+WEBHOOK_URL = f"https://{os.environ['RENDER_EXTERNAL_HOSTNAME']}/webhook"
 
-# Handlers
+# 🤖 Bot logic
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    sent = await update.message.reply_text("👋 Welcome to MonkTV Bot! Send me a keyword to search 🔎\n" + WEBSITE_LINK)
-    await schedule_delete(context, sent)
+    await update.message.reply_text("👋 Welcome! Send me a keyword to search 🎥")
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.lower()
@@ -46,31 +46,31 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for row in values:
         if query in row[0].lower():
-            sent = await update.message.reply_text(f"🎥 *{row[0]}*: {row[1]}\n\n{WEBSITE_LINK}", parse_mode='Markdown')
-            await schedule_delete(context, sent)
+            reply = f"🔎 *{row[0]}*:\n{row[1]}\n\n📺 Visit: monktv.glide.page"
+            sent = await update.message.reply_text(reply, parse_mode="Markdown")
+            await asyncio.sleep(43200)  # 12 hours
+            await sent.delete()
             return
 
-    sent = await update.message.reply_text("🚫 No match found!\n\n" + WEBSITE_LINK)
-    await schedule_delete(context, sent)
-
-# Schedule delete after 12 hours (43200 seconds)
-async def schedule_delete(context, message):
+    sent = await update.message.reply_text("🚫 No match found.\n\n📺 Visit: monktv.glide.page")
     await asyncio.sleep(43200)  # 12 hours
-    try:
-        await context.bot.delete_message(chat_id=message.chat_id, message_id=message.message_id)
-    except Exception as e:
-        logger.warning(f"Could not delete message: {e}")
+    await sent.delete()
 
-# Main
-async def main():
-    app = ApplicationBuilder().token("7346055162:AAEpJC6HWmnG3sywQtBw_b3-TRqM6Ka0AkA").build()
+# ⛓️ Connect bot with FastAPI
+@app.on_event("startup")
+async def on_startup():
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))
+    await application.bot.delete_webhook()
+    await application.bot.set_webhook(url=WEBHOOK_URL)
+    app.bot_app = application
+    asyncio.create_task(application.initialize())
+    asyncio.create_task(application.start())
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))
-
-    print("🚀 Bot is running...")
-    await app.run_polling()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, app.bot_app.bot)
+    await app.bot_app.process_update(update)
+    return {"ok": True}
