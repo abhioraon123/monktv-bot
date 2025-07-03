@@ -34,7 +34,8 @@ service_creds = service_account.Credentials.from_service_account_info(creds_dict
 sheet = build('sheets', 'v4', credentials=service_creds).spreadsheets()
 
 # Telegram bot token and app
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("7346055162:AAEpJC6HWmnG3sywQtBw_b3-TRqM6Ka0AkA
+")
 app = FastAPI()
 
 # Telegram application setup
