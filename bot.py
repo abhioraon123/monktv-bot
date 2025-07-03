@@ -2,15 +2,15 @@ import nest_asyncio
 nest_asyncio.apply()
 
 import logging
-import os
-import json
 import asyncio
-
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+)
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
+import os
+import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -29,25 +29,19 @@ gc = gspread.authorize(credentials)
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 SPREADSHEET_ID = '1K-Nuv4dB8_MPBvk-Jc4Qr_Haa4nW6Z8z2kbfUemYe1U'
 RANGE_NAME = 'Sheet1!A:B'
+SERVICE_ACCOUNT_FILE = 'credentials.json'
 
-# Authorize Google Sheets
-SERVICE_ACCOUNT_FILE = "credentials.json"
+# Authorize Sheets API
 creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES
 )
 sheet = build('sheets', 'v4', credentials=creds).spreadsheets()
 
-# Telegram Bot Handlers
-
+# Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = await update.message.reply_text(
-        "Welcome! Send a keyword to search.\n\n📺 Visit us: https://monktv.glide.page"
-    )
-    await asyncio.sleep(43200)  # 12 hours = 43,200 seconds
-    try:
-        await message.delete()
-    except:
-        pass
+    msg = "🎬 *Welcome to MonkTV Bot!*\n\nJust type a keyword to search 🔎 your movie or series.\n\n📺 *Visit us:* monktv.glide.page"
+    sent_msg = await update.message.reply_text(msg, parse_mode="Markdown")
+    await context.bot.delete_message(chat_id=sent_msg.chat_id, message_id=sent_msg.message_id, delay=43200)  # 12 hrs
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.lower()
@@ -56,26 +50,16 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for row in values:
         if query in row[0].lower():
-            message = await update.message.reply_text(
-                f'{row[0]}: {row[1]}\n\n📺 Visit us: https://monktv.glide.page'
-            )
-            await asyncio.sleep(43200)
-            try:
-                await message.delete()
-            except:
-                pass
+            msg = f"🎥 *{row[0]}*\n\n🔗 {row[1]}\n\n📺 *More:* monktv.glide.page"
+            sent_msg = await update.message.reply_text(msg, parse_mode="Markdown")
+            await context.bot.delete_message(chat_id=sent_msg.chat_id, message_id=sent_msg.message_id, delay=43200)
             return
 
-    message = await update.message.reply_text(
-        "No match found.\n\n📺 Visit us: https://monktv.glide.page"
-    )
-    await asyncio.sleep(43200)
-    try:
-        await message.delete()
-    except:
-        pass
+    no_match = "🚫 *No match found!*\nTry a different keyword.\n\n📺 *Visit:* monktv.glide.page"
+    sent_msg = await update.message.reply_text(no_match, parse_mode="Markdown")
+    await context.bot.delete_message(chat_id=sent_msg.chat_id, message_id=sent_msg.message_id, delay=43200)
 
-# Main Function
+# Main function
 async def main():
     app = ApplicationBuilder().token("7346055162:AAEpJC6HWmnG3sywQtBw_b3-TRqM6Ka0AkA").build()
 
