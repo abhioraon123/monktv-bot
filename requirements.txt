@@ -2,3 +2,4 @@ python-telegram-bot[job-queue]==20.7
 fastapi==0.115.2
 uvicorn==0.35.0
 gspread==5.12.4
+google-auth
