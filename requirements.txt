@@ -1,9 +1,6 @@
+fastapi
+uvicorn
 python-telegram-bot==20.7
-fastapi==0.115.2
-uvicorn==0.35.0
-google-api-python-client==2.107.0
-google-auth==2.29.0
-google-auth-httplib2==0.2.0
-google-auth-oauthlib==1.2.0
-googleapis-common-protos==1.56.0
-nest_asyncio==1.6.0
+gspread
+google-auth           # for Google service account credentials
+apscheduler>=3.10,<3.12  # needed for PTB job-queue
