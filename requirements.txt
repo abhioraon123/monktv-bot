@@ -1,9 +1,10 @@
-python-telegram-bot==20.7
 fastapi
 uvicorn
-nest_asyncio
-google-api-python-client
+python-telegram-bot==20.7
+gspread
 google-auth
 google-auth-oauthlib
-gspread
+google-auth-httplib2
+google-api-python-client
 oauth2client
+nest_asyncio
