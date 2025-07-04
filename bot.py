@@ -1,8 +1,10 @@
 # bot.py
 
 import os
+import json
 from http import HTTPStatus
 from contextlib import asynccontextmanager
+from gspread.exceptions import SpreadsheetNotFound
 
 import gspread
 from fastapi import FastAPI, Request, Response
@@ -11,21 +13,24 @@ from telegram.ext import (
     Application, CommandHandler, ContextTypes
 )
 
-# --- Load Env Vars ---
+# --- Load environment variables ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
-if not BOT_TOKEN or not WEBHOOK_URL:
-    raise ValueError("Missing BOT_TOKEN or WEBHOOK_URL")
+if not BOT_TOKEN or not WEBHOOK_URL or not SPREADSHEET_ID:
+    raise ValueError("Missing BOT_TOKEN, WEBHOOK_URL, or SPREADSHEET_ID")
 
-# --- Google Sheets Setup ---
+# --- Setup Google Sheets ---
 gc = gspread.service_account(filename="credentials.json")
-sheet = gc.open("Sheet1").sheet1  # ✅ Sheet name is 'Sheet1'
+try:
+    sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+except SpreadsheetNotFound:
+    raise Exception("📄 Spreadsheet not found. Check SPREADSHEET_ID and permissions.")
 
 # --- Telegram Bot Setup ---
 application = Application.builder().token(BOT_TOKEN).build()
 
-# --- Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("Hello! I am your bot 👋")
     auto_msg = await update.message.reply_text("This message will self-destruct in 12 hours 🔥")
@@ -37,7 +42,6 @@ async def log_to_sheet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sheet.append_row([str(user), text])
     await update.message.reply_text("✅ Logged to sheet!")
 
-# --- Register Handlers ---
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("log", log_to_sheet))
 
