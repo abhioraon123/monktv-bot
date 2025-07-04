@@ -1,62 +1,80 @@
-# bot.py
 import os
+import json
 from http import HTTPStatus
 from contextlib import asynccontextmanager
-
-import gspread
 from fastapi import FastAPI, Request, Response
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+)
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 
-# --- Telegram Bot Setup ---
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # Set your bot token in environment
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")       # Set your Render app's URL here
-# Initialize the PTB application (no Updater, use builder)
-app_builder = ApplicationBuilder().token(BOT_TOKEN)
-application = app_builder.build()
+# 🔐 Load credentials
+GOOGLE_CREDS = os.getenv("GOOGLE_CREDS")
+creds_dict = json.loads(GOOGLE_CREDS)
+scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+sheet_service = build("sheets", "v4", credentials=creds).spreadsheets()
+SPREADSHEET_ID = "1K-Nuv4dB8_MPBvk-Jc4Qr_Haa4nW6Z8z2kbfUemYe1U"
+RANGE_NAME = "Sheet1!A:B"
 
-# --- Google Sheets Setup ---
-# Provide path to your service account JSON and sheet name
-gc = gspread.service_account(filename='service_account.json')
-sheet = gc.open("YourSpreadsheetName").sheet1  # open your Google Sheet
+# 🔧 Telegram Bot setup
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # set in Render environment tab
+scheduler = AsyncIOScheduler()
+app_telegram = ApplicationBuilder().token(BOT_TOKEN).post_init(scheduler.start).build()
 
-# --- FastAPI Application and Webhook Endpoint ---
+# 🚀 FastAPI app with lifespan hook
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Set the Telegram webhook to our Render URL on startup
-    await application.bot.setWebhook(WEBHOOK_URL)
-    async with application:
-        await application.start()
+    await app_telegram.bot.set_webhook(WEBHOOK_URL)
+    async with app_telegram:
+        await app_telegram.start()
         yield
-        await application.stop()
+        await app_telegram.stop()
 
 app = FastAPI(lifespan=lifespan)
 
-@app.post("/")  # Telegram will send updates to this endpoint
-async def receive_update(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, application.bot)
-    await application.process_update(update)
+@app.post("/")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    update = Update.de_json(data, app_telegram.bot)
+    await app_telegram.process_update(update)
     return Response(status_code=HTTPStatus.OK)
 
-# --- Handler Functions ---
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Example /start command handler."""
-    await update.message.reply_text("Hello! I am your bot 👋")
-    
-    # Schedule auto-delete of this message after 12 hours (43200 seconds)
-    sent_msg = await update.message.reply_text("This message will self-destruct in 12 hours 🔥")
-    context.job_queue.run_once(lambda ctx: ctx.job.context(), 43200, context=sent_msg.delete)
+# 🧼 Auto-delete handler (12 hours = 43200 sec)
+async def delete_after_12hrs(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    try:
+        await app_telegram.bot.delete_message(chat_id=job.chat_id, message_id=job.message_id)
+    except Exception as e:
+        print(f"Delete failed: {e}")
 
-async def log_to_sheet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Example handler to log data to Google Sheets."""
-    user = update.effective_user.username or update.effective_user.id
-    text = update.message.text
-    sheet.append_row([user, text])  # Add a new row with user and message
+# ✅ /start command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reply = await update.message.reply_text("👋 Hello! Send me a keyword and I’ll search it for you!")
+    context.job_queue.run_once(delete_after_12hrs, 43200, chat_id=reply.chat_id, message_id=reply.message_id)
+    context.job_queue.run_once(delete_after_12hrs, 43200, chat_id=update.message.chat_id, message_id=update.message.message_id)
 
-# Register handlers
-application.add_handler(CommandHandler("start", start_cmd))
-application.add_handler(CommandHandler("log", log_to_sheet))
+# 🔍 Search handler
+async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.lower()
+    result = sheet_service.values().get(spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME).execute()
+    rows = result.get("values", [])
 
-# Note: On Render, start this app with a command like:
-# uvicorn bot:app --host 0.0.0.0 --port $PORT
+    for row in rows:
+        if query in row[0].lower():
+            reply = await update.message.reply_text(f"🎥 {row[0]}:\n{row[1]}\n\n📺 https://monktv.glide.page")
+            context.job_queue.run_once(delete_after_12hrs, 43200, chat_id=reply.chat_id, message_id=reply.message_id)
+            context.job_queue.run_once(delete_after_12hrs, 43200, chat_id=update.message.chat_id, message_id=update.message.message_id)
+            return
+
+    reply = await update.message.reply_text("🚫 No match found. Try another keyword!\n📺 https://monktv.glide.page")
+    context.job_queue.run_once(delete_after_12hrs, 43200, chat_id=reply.chat_id, message_id=reply.message_id)
+    context.job_queue.run_once(delete_after_12hrs, 43200, chat_id=update.message.chat_id, message_id=update.message.message_id)
+
+# 🔌 Register handlers
+app_telegram.add_handler(CommandHandler("start", start))
+app_telegram.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))

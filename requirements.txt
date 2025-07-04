@@ -1,6 +1,4 @@
-fastapi
-uvicorn
-python-telegram-bot==20.7
-gspread
-google-auth           # for Google service account credentials
-apscheduler>=3.10,<3.12  # needed for PTB job-queue
+python-telegram-bot[job-queue]==20.7
+fastapi==0.115.2
+uvicorn==0.35.0
+gspread==5.12.4
