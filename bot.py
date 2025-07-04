@@ -22,7 +22,7 @@ RANGE_NAME = "Sheet1!A:B"
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # set in Render environment tab
 scheduler = AsyncIOScheduler()
-app_telegram = ApplicationBuilder().token(BOT_TOKEN).post_init(scheduler.start).build()
+application = ApplicationBuilder().token(BOT_TOKEN).build()
 
 # 🚀 FastAPI app with lifespan hook
 @asynccontextmanager
