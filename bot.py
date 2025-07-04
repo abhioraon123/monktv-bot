@@ -19,13 +19,13 @@ if not BOT_TOKEN or not WEBHOOK_URL:
     raise ValueError("Missing BOT_TOKEN or WEBHOOK_URL")
 
 # --- Google Sheets Setup ---
-# The credentials.json file is in Render Secrets (not env variable)
 gc = gspread.service_account(filename="credentials.json")
-sheet = gc.open("YourSpreadsheetName").sheet1  # replace with your real Sheet name
+sheet = gc.open("Sheet1").sheet1  # ✅ Sheet name is 'Sheet1'
 
 # --- Telegram Bot Setup ---
 application = Application.builder().token(BOT_TOKEN).build()
 
+# --- Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("Hello! I am your bot 👋")
     auto_msg = await update.message.reply_text("This message will self-destruct in 12 hours 🔥")
@@ -37,6 +37,7 @@ async def log_to_sheet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sheet.append_row([str(user), text])
     await update.message.reply_text("✅ Logged to sheet!")
 
+# --- Register Handlers ---
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("log", log_to_sheet))
 
