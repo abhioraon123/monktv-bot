@@ -1,4 +1,6 @@
+HEAD
 import os
+# Just triggering redeploy import os 83daafe (✅ Initial commit: linked project with GitHub)
 import json
 import logging
 import gspread
