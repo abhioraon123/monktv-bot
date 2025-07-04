@@ -23,16 +23,13 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-
-# Load Google credentials from env and connect to sheet
-creds_json = os.getenv("GOOGLE_CREDS_JSON")
-creds_dict = json.loads(creds_json)
-gc = gspread.service_account_from_dict(creds_dict)
-sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
 
 # FastAPI app
 app = FastAPI()
-telegram_app = None  # Will be initialized on startup
+telegram_app = None
+sheet = None  # We'll load this after startup
+
 
 # /start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -44,8 +41,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     context.job_queue.run_once(delete_message, 43200, data={"chat_id": msg.chat_id, "message_id": msg.message_id})
 
+
 # Search query handler
 async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global sheet
     query = update.message.text.lower()
     data = sheet.get_all_values()
 
@@ -70,6 +69,7 @@ async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("🚫 No match found. Try something else?")
         context.job_queue.run_once(delete_message, 43200, data={"chat_id": msg.chat_id, "message_id": msg.message_id})
 
+
 # Auto-delete job
 async def delete_message(context: CallbackContext):
     job_data = context.job.data
@@ -78,12 +78,19 @@ async def delete_message(context: CallbackContext):
     except Exception as e:
         logger.warning(f"Failed to delete message: {e}")
 
+
 # PTB startup and shutdown
 @app.on_event("startup")
 async def startup():
-    global telegram_app
-    telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
+    global telegram_app, sheet
 
+    # Load Google Sheets
+    creds_dict = json.loads(GOOGLE_CREDS_JSON)
+    gc = gspread.service_account_from_dict(creds_dict)
+    sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+
+    # Start Telegram bot
+    telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_query))
 
@@ -91,11 +98,13 @@ async def startup():
     await telegram_app.start()
     await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/telegram")
 
+
 @app.on_event("shutdown")
 async def shutdown():
     await telegram_app.bot.delete_webhook()
     await telegram_app.stop()
     await telegram_app.shutdown()
+
 
 # Telegram webhook endpoint
 @app.post("/telegram")
@@ -103,4 +112,4 @@ async def telegram_webhook(req: Request):
     data = await req.json()
     update = Update.de_json(data, telegram_app.bot)
     await telegram_app.process_update(update)
-    return {"ok": True}
+    return {"ok": True"}
