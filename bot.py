@@ -15,7 +15,6 @@ GOOGLE_CREDS = os.getenv("GOOGLE_CREDS")
 creds_dict = json.loads(GOOGLE_CREDS)
 scopes = ["https://www.googleapis.com/auth/spreadsheets"]
 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-sheet_service = build("sheets", "v4", credentials=creds).spreadsheets()
 SPREADSHEET_ID = "1K-Nuv4dB8_MPBvk-Jc4Qr_Haa4nW6Z8z2kbfUemYe1U"
 RANGE_NAME = "Sheet1!A:B"
 
