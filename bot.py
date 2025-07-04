@@ -1,4 +1,6 @@
 import os
+import sys
+import telegram  # Added for version check
 from http import HTTPStatus
 from contextlib import asynccontextmanager
 
@@ -6,7 +8,24 @@ import gspread
 from fastapi import FastAPI, Request, Response
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-from gspread.exceptions import SpreadsheetNotFound, APIError  # Added error handling
+from gspread.exceptions import SpreadsheetNotFound, APIError
+
+# --- Critical Version Check ---
+print("Checking python-telegram-bot version...")
+ptb_version = telegram.__version__
+print(f"Detected version: {ptb_version}")
+
+# Convert version string to comparable numbers
+version_parts = ptb_version.split('.')
+major = int(version_parts[0])
+minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+
+if major < 20 or (major == 20 and minor < 8):
+    print(f"❌ FATAL ERROR: Need python-telegram-bot v20.8+, found v{ptb_version}")
+    print("This version causes AttributeError in Render deployments")
+    sys.exit(1)  # Force quit with error code
+else:
+    print("✅ Version check passed - compatible with Render")
 
 # --- Load Env Vars ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -16,20 +35,29 @@ SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 # Validate environment variables
 if not all([BOT_TOKEN, WEBHOOK_URL, SPREADSHEET_ID]):
     missing = [var for var in ["BOT_TOKEN", "WEBHOOK_URL", "SPREADSHEET_ID"] if not os.getenv(var)]
-    raise ValueError(f"Missing environment variables: {', '.join(missing)}")
+    print(f"❌ Missing environment variables: {', '.join(missing)}")
+    sys.exit(1)
 
 # --- Google Sheets Setup ---
 try:
+    print("Initializing Google Sheets connection...")
     gc = gspread.service_account(filename="credentials.json")
     sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
     print("✅ Google Sheets connection successful")
 except (SpreadsheetNotFound, APIError) as e:
     print(f"❌ Google Sheets Error: {str(e)}")
-    raise
+    sys.exit(1)
 
 # --- Telegram Bot Setup ---
-application = Application.builder().token(BOT_TOKEN).build()
+try:
+    print("Building Telegram application...")
+    application = Application.builder().token(BOT_TOKEN).build()
+    print("✅ Telegram application built successfully")
+except Exception as e:
+    print(f"❌ Telegram setup failed: {str(e)}")
+    sys.exit(1)
 
+# Command handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hello! I am your bot 👋")
     auto_msg = await update.message.reply_text("This message will self-destruct in 12 hours 🔥")
@@ -43,7 +71,6 @@ async def log_to_sheet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Logged to sheet!")
     except Exception as e:
         await update.message.reply_text(f"❌ Failed to log: {str(e)}")
-        print(f"Logging error: {str(e)}")
 
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("log", log_to_sheet))
@@ -52,11 +79,12 @@ application.add_handler(CommandHandler("log", log_to_sheet))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
+        print(f"Setting webhook to: {WEBHOOK_URL}")
         await application.bot.set_webhook(WEBHOOK_URL)
-        print(f"✅ Webhook set to {WEBHOOK_URL}")
+        print("✅ Webhook set successfully")
     except Exception as e:
         print(f"❌ Webhook setup failed: {str(e)}")
-        raise
+        sys.exit(1)
     
     async with application:
         await application.start()
@@ -73,5 +101,5 @@ async def telegram_webhook(request: Request):
         await application.process_update(update)
         return Response(status_code=HTTPStatus.OK)
     except Exception as e:
-        print(f"Webhook error: {str(e)}")
+        print(f"Webhook processing error: {str(e)}")
         return Response(status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
