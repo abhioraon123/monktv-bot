@@ -1,10 +1,8 @@
 # bot.py
 
 import os
-import json
 from http import HTTPStatus
 from contextlib import asynccontextmanager
-from gspread.exceptions import SpreadsheetNotFound
 
 import gspread
 from fastapi import FastAPI, Request, Response
@@ -13,20 +11,17 @@ from telegram.ext import (
     Application, CommandHandler, ContextTypes
 )
 
-# --- Load environment variables ---
+# --- Load Env Vars ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
 if not BOT_TOKEN or not WEBHOOK_URL or not SPREADSHEET_ID:
-    raise ValueError("Missing BOT_TOKEN, WEBHOOK_URL, or SPREADSHEET_ID")
+    raise ValueError("Missing one of: BOT_TOKEN, WEBHOOK_URL, SPREADSHEET_ID")
 
-# --- Setup Google Sheets ---
+# --- Google Sheets Setup ---
 gc = gspread.service_account(filename="credentials.json")
-try:
-    sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
-except SpreadsheetNotFound:
-    raise Exception("📄 Spreadsheet not found. Check SPREADSHEET_ID and permissions.")
+sheet = gc.open_by_key(SPREADSHEET_ID).sheet1  # Opens the correct sheet
 
 # --- Telegram Bot Setup ---
 application = Application.builder().token(BOT_TOKEN).build()
