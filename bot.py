@@ -4,11 +4,10 @@ nest_asyncio.apply()
 import logging
 import json
 import os
-import asyncio
 from fastapi import FastAPI, Request
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from telegram import Update, Message
+from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 # Logging
@@ -34,21 +33,13 @@ app = FastAPI()
 # Telegram bot app
 application: Application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# 🧹 Auto-delete message after 12 hours
-async def auto_delete(message: Message):
-    await asyncio.sleep(43200)  # 12 hours
-    try:
-        await message.delete()
-    except Exception as e:
-        logger.warning(f"❌ Failed to delete message: {e}")
-
 # Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    sent = await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text="👋 Hello! Send me a keyword and I’ll search it for you! 🔍\n\n📺 Visit: https://monktv.glide.page"
+    msg = await update.message.reply_text(
+        "👋 Hello! Send me a keyword and I’ll search it for you! 🔍\n\n📺 Visit: https://monktv.glide.page"
     )
-    asyncio.create_task(auto_delete(sent))
+    # Auto delete after 6 hours
+    await context.bot.delete_message(chat_id=msg.chat_id, message_id=msg.message_id, delay=21600)
 
 # Search function
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58,30 +49,32 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for row in values:
         if query in row[0].lower():
-            sent = await update.message.reply_text(
+            msg = await update.message.reply_text(
                 f"🎥 {row[0]}:\n{row[1]}\n\n📺 https://monktv.glide.page"
             )
-            asyncio.create_task(auto_delete(sent))
+            await context.bot.delete_message(chat_id=msg.chat_id, message_id=msg.message_id, delay=21600)
             return
 
-    sent = await update.message.reply_text(
-        "🚫 No match found. Try another keyword!\n📺 https://monktv.glide.page"
-    )
-    asyncio.create_task(auto_delete(sent))
+    msg = await update.message.reply_text("🚫 No match found. Try another keyword!\n📺 https://monktv.glide.page")
+    await context.bot.delete_message(chat_id=msg.chat_id, message_id=msg.message_id, delay=21600)
 
 # Add handlers
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))
 
-# FastAPI startup event — NO POLLING HERE ❌
+# FastAPI startup event
 @app.on_event("startup")
 async def on_startup():
     await application.initialize()
     await application.start()
+    # ✅ DO NOT USE polling or Updater here
+    webhook_url = "https://your-render-url.onrender.com"  # 🔁 Replace with your actual Render URL
+    await application.bot.set_webhook(webhook_url)
 
+# Telegram sends updates here
 @app.post("/")
-async def webhook(request: Request):
-    data = await request.json()
+async def telegram_webhook(req: Request):
+    data = await req.json()
     update = Update.de_json(data, application.bot)
     await application.process_update(update)
-    return {"status": "ok"}
+    return {"ok": True}
