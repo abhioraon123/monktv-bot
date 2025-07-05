@@ -60,18 +60,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 🚀 Webhook setup on bot startup
 @app.on_event("startup")
-async def on_startup():
+async def startup():
     global application
     application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
-        .post_init(set_webhook)
         .build()
     )
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(...)
     await application.initialize()
     await application.start()
+    await application.bot.set_webhook(f"{WEBHOOK_URL}/telegram/webhook")  
 
 # 🧠 Webhook registration
 async def set_webhook(app):
