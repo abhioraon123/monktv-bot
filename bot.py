@@ -9,13 +9,13 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    filters,
-    ContextTypes,
     CallbackContext,
+    ContextTypes,
+    filters,
 )
 from telegram.constants import ParseMode
 
-# Logging setup
+# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,8 @@ SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
 # FastAPI app
 app = FastAPI()
-telegram_app = None  # Will be initialized on startup
-sheet = None  # Will be loaded during startup
+telegram_app = None
+sheet = None
 
 # /start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -39,11 +39,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     context.job_queue.run_once(delete_message, 43200, data={"chat_id": msg.chat_id, "message_id": msg.message_id})
 
-# Search query handler
+# Handle search queries
 async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.lower()
     data = sheet.get_all_values()
-
     header = data[0]
     rows = data[1:]
 
@@ -65,20 +64,20 @@ async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("🚫 No match found. Try something else?")
         context.job_queue.run_once(delete_message, 43200, data={"chat_id": msg.chat_id, "message_id": msg.message_id})
 
-# Auto-delete job
+# Auto-delete messages after 12 hours
 async def delete_message(context: CallbackContext):
     job_data = context.job.data
     try:
         await context.bot.delete_message(chat_id=job_data["chat_id"], message_id=job_data["message_id"])
     except Exception as e:
-        logger.warning(f"Failed to delete message: {e}")
+        logger.warning(f"⚠️ Failed to delete message: {e}")
 
-# PTB startup and shutdown
+# FastAPI startup
 @app.on_event("startup")
 async def startup():
     global telegram_app, sheet
 
-    # Connect to Google Sheet
+    # Load Google Sheet
     try:
         creds_json = os.getenv("GOOGLE_CREDS_JSON")
         creds_dict = json.loads(creds_json)
@@ -89,7 +88,7 @@ async def startup():
         logger.error(f"❌ Failed to connect to Google Sheet: {e}")
         raise
 
-    # Start Telegram App
+    # Start Telegram application
     telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_query))
@@ -98,6 +97,7 @@ async def startup():
     await telegram_app.start()
     await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/telegram")
 
+# FastAPI shutdown
 @app.on_event("shutdown")
 async def shutdown():
     await telegram_app.bot.delete_webhook()
