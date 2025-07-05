@@ -7,13 +7,11 @@ from contextlib import asynccontextmanager
 from telegram import Update, Bot
 from telegram.constants import ParseMode
 from telegram.ext import (
-    Application,
     ApplicationBuilder,
+    Application,
     CommandHandler,
     MessageHandler,
     ContextTypes,
-    JobQueue,
-    Job,
     filters,
 )
 
@@ -56,8 +54,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{EMOJI_MOVIE} Send a movie name to search.\n"
         f"{EMOJI_SITE} Visit: https://monktv.glide.page"
     )
-    sent_msg = await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-    context.job_queue.run_once(delete_message, 43200, data=(update.message.chat_id, sent_msg.message_id))
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 # Handle search query
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -67,19 +64,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if results:
         for movie in results[:5]:
             msg = f"{EMOJI_MOVIE} *{movie['Title']}*\n{EMOJI_SEARCH} [Watch Now]({movie['Link']})"
-            sent = await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-            context.job_queue.run_once(delete_message, 43200, data=(update.message.chat_id, sent.message_id))
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
     else:
-        sent = await update.message.reply_text(f"{EMOJI_NO_MATCH} No match found for *{query}*", parse_mode=ParseMode.MARKDOWN)
-        context.job_queue.run_once(delete_message, 43200, data=(update.message.chat_id, sent.message_id))
-
-# Auto-delete messages after 12 hours
-async def delete_message(context: ContextTypes.DEFAULT_TYPE):
-    try:
-        chat_id, message_id = context.job.data
-        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to auto-delete message: {e}")
+        await update.message.reply_text(
+            f"{EMOJI_NO_MATCH} No match found for *{query}*", parse_mode=ParseMode.MARKDOWN
+        )
 
 # FastAPI + PTB integration
 @asynccontextmanager
@@ -107,15 +96,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Failed to set webhook: {e}")
 
-    # Start polling internal jobs (job_queue needs this)
     await telegram_app.initialize()
     await telegram_app.start()
-    await telegram_app.updater.start_polling()  # Only to run job_queue; not actual polling
-
     yield
-
-    # Shutdown
-    await telegram_app.updater.stop()
     await telegram_app.stop()
     await telegram_app.shutdown()
 
