@@ -62,32 +62,46 @@ def setup_google_sheets():
         gc = gspread.service_account_from_dict(google_creds)
         logger.info("✅ Google service account created successfully")
         
-        # Try to open the spreadsheet
-        sheet_name = "Sheet1"
-        try:
-            spreadsheet = gc.open(sheet_name)
-            logger.info(f"✅ Spreadsheet '{sheet_name}' opened successfully")
-        except gspread.SpreadsheetNotFound:
-            logger.error(f"❌ Spreadsheet '{sheet_name}' not found")
-            # List available spreadsheets
+        # Try to open the spreadsheet by ID (more reliable than name)
+        spreadsheet_id = os.getenv('SPREADSHEET_ID')
+        if spreadsheet_id:
             try:
-                sheets = gc.list_spreadsheet_files()
-                logger.info(f"📋 Available spreadsheets: {[s['name'] for s in sheets]}")
-            except Exception as list_error:
-                logger.error(f"❌ Could not list spreadsheets: {list_error}")
-            raise ValueError(f"Spreadsheet '{sheet_name}' not found. Make sure the service account has access to it.")
-        except Exception as e:
-            logger.error(f"❌ Error opening spreadsheet: {e}")
-            raise ValueError(f"Error opening spreadsheet: {e}")
+                spreadsheet = gc.open_by_key(spreadsheet_id)
+                logger.info(f"✅ Spreadsheet opened successfully by ID: {spreadsheet_id}")
+            except Exception as e:
+                logger.error(f"❌ Error opening spreadsheet by ID: {e}")
+                raise ValueError(f"Error opening spreadsheet by ID: {e}")
+        else:
+            # Fallback to opening by name
+            sheet_name = "Sheet1"
+            try:
+                spreadsheet = gc.open(sheet_name)
+                logger.info(f"✅ Spreadsheet '{sheet_name}' opened successfully")
+            except gspread.SpreadsheetNotFound:
+                logger.error(f"❌ Spreadsheet '{sheet_name}' not found")
+                # List available spreadsheets
+                try:
+                    sheets = gc.list_spreadsheet_files()
+                    logger.info(f"📋 Available spreadsheets: {[s['name'] for s in sheets]}")
+                except Exception as list_error:
+                    logger.error(f"❌ Could not list spreadsheets: {list_error}")
+                raise ValueError(f"Spreadsheet '{sheet_name}' not found. Make sure the service account has access to it.")
+            except Exception as e:
+                logger.error(f"❌ Error opening spreadsheet: {e}")
+                raise ValueError(f"Error opening spreadsheet: {e}")
         
         # Get the first worksheet
         try:
             worksheet = spreadsheet.sheet1
             logger.info("✅ Worksheet accessed successfully")
             
-            # Test reading from the sheet
-            test_data = worksheet.get_all_records(limit=1)
-            logger.info(f"✅ Sheet test read successful. Sample data: {test_data}")
+            # Test reading from the sheet - FIXED: removed limit parameter
+            test_data = worksheet.get_all_records()
+            # Only show first record for testing
+            if test_data:
+                logger.info(f"✅ Sheet test read successful. Sample data: {test_data[0]}")
+            else:
+                logger.info("✅ Sheet test read successful. No data found.")
             
         except Exception as e:
             logger.error(f"❌ Error accessing worksheet: {e}")
@@ -108,6 +122,9 @@ def search_google_sheets(query: str) -> str:
         
         # Get all records
         records = worksheet.get_all_records()
+        
+        if not records:
+            return "❌ No data found in the spreadsheet"
         
         # Filter records that match the query
         matching_records = []
@@ -130,6 +147,9 @@ def search_google_sheets(query: str) -> str:
                     result_text += f"{key}: {value} | "
             result_text = result_text.rstrip(" | ") + "\n\n"
         
+        if len(matching_records) > 5:
+            result_text += f"... and {len(matching_records) - 5} more results"
+        
         return result_text
     except Exception as e:
         logger.error(f"❌ Search failed: {e}")
@@ -141,7 +161,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🤖 Welcome to MonkTV Search Bot!\n\n"
             "Use /search <query> to search our database.\n"
-            "Example: /search your query here"
+            "Example: /search your query here\n\n"
+            "Or just type your query directly without the /search command!"
         )
     except Exception as e:
         logger.error(f"❌ Start command failed: {e}")
@@ -155,6 +176,9 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         query = ' '.join(context.args)
         logger.info(f"🔍 Searching for: {query}")
+        
+        # Send "typing" action to show bot is working
+        await update.message.reply_chat_action("typing")
         
         # Search Google Sheets
         result = search_google_sheets(query)
@@ -174,13 +198,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # If message doesn't start with /, treat as search
         if not message.startswith('/'):
+            # Send "typing" action to show bot is working
+            await update.message.reply_chat_action("typing")
+            
             result = search_google_sheets(message)
             await update.message.reply_text(result)
         else:
-            await update.message.reply_text("❌ Unknown command. Use /search <query> to search.")
+            await update.message.reply_text("❌ Unknown command. Use /search <query> to search or just type your query directly!")
             
     except Exception as e:
         logger.error(f"❌ Message handling failed: {e}")
+        await update.message.reply_text("❌ Sorry, something went wrong while processing your message.")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -236,6 +264,11 @@ app = FastAPI(lifespan=lifespan)
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "message": "MonkTV Bot is running"}
+
+@app.get("/health")
+async def health_check_alt():
+    """Alternative health check endpoint"""
+    return {"status": "ok", "bot_connected": worksheet is not None}
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
