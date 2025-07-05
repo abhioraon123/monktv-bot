@@ -63,7 +63,7 @@ def setup_google_sheets():
         logger.info("✅ Google service account created successfully")
         
         # Try to open the spreadsheet
-        sheet_name = "sheet1"
+        sheet_name = "Sheet1"
         try:
             spreadsheet = gc.open(sheet_name)
             logger.info(f"✅ Spreadsheet '{sheet_name}' opened successfully")
