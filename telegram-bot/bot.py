@@ -3,6 +3,7 @@ import json
 import logging
 import gspread
 from fastapi import FastAPI, Request
+from contextlib import asynccontextmanager
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -23,13 +24,31 @@ WEBHOOK_URL = os.environ["WEBHOOK_URL"]
 GOOGLE_CREDS_JSON = os.environ["GOOGLE_CREDS_JSON"]
 SPREADSHEET_ID = "1K-Nuv4dB8_MPBvk-Jc4Qr_Haa4nW6Z8z2kbfUemYe1U"
 
-# ⚙️ Create FastAPI app
-app = FastAPI()
-
 # 📊 Connect to Google Sheets
 creds_dict = json.loads(GOOGLE_CREDS_JSON)
 gc = gspread.service_account_from_dict(creds_dict)
 sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+
+# ⚙️ Lifespan startup/shutdown
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global application
+    application = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .build()
+    )
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    await application.initialize()
+    await application.start()
+    await application.bot.set_webhook(f"{WEBHOOK_URL}/telegram/webhook")
+    yield
+    await application.stop()
+    await application.shutdown()
+
+# ⚙️ Create FastAPI app with lifespan
+app = FastAPI(lifespan=lifespan)
 
 # 🧾 /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -57,30 +76,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_html(text, disable_web_page_preview=True)
     else:
         await update.message.reply_text("🚫 No match found.")
-
-# 🚀 Webhook setup on bot startup
-@app.on_event("startup")
-async def startup():
-    global application
-    application = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-    application.add_handler(...)
-    await application.initialize()
-    await application.start()
-    await application.bot.set_webhook(f"{WEBHOOK_URL}/telegram/webhook")  
-
-# 🧠 Webhook registration
-async def set_webhook(app):
-    await app.bot.set_webhook(WEBHOOK_URL)
-
-# 📴 Graceful shutdown
-@app.on_event("shutdown")
-async def on_shutdown():
-    await application.stop()
-    await application.shutdown()
 
 # 📬 Webhook endpoint for Telegram
 @app.post("/telegram/webhook")
