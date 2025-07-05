@@ -94,7 +94,7 @@ async def on_startup():
         raise
 
     # Build Telegram App with webhook only (no Updater)
-    telegram_app = Application.builder().token(BOT_TOKEN).build()
+    telegram_app = Application.builder().token(BOT_TOKEN).post_init(None).post_shutdown(None).build()
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_query))
 
