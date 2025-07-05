@@ -20,7 +20,7 @@ from datetime import timedelta
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load environment variables
+# Load env variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
@@ -33,26 +33,37 @@ logger.info("✅ Connected to Google Sheet")
 
 # FastAPI app
 app = FastAPI()
-telegram_app = None  # Will hold the PTB app
+telegram_app = None
 
-# Emoji constants
+# Emojis
 EMOJI_MOVIE = "🎥"
 EMOJI_SEARCH = "🔎"
 EMOJI_SITE = "📺"
 EMOJI_NO_MATCH = "🚫"
 
-# Search function
+# Health check
+@app.get("/")
+async def root():
+    return {"status": "✅ MonkTV bot is running!"}
+
+# Search movie logic
 def search_movies(query):
     rows = sheet.get_all_records()
     results = []
+    seen = set()
     query = query.lower()
+
     for row in rows:
         title = str(row.get("Title", "")).lower()
-        if query in title:
+        link = str(row.get("Link", ""))
+        if not title or not link:
+            continue
+        if query in title and title not in seen:
             results.append(row)
+            seen.add(title)
     return results
 
-# Auto-delete function (12 hours = 43200 sec)
+# Auto-delete (12 minutes = 720 sec)
 async def delete_message_after_delay(context: CallbackContext):
     try:
         await context.bot.delete_message(
@@ -75,23 +86,28 @@ async def start(update: Update, context: CallbackContext):
         f"{EMOJI_SITE} Visit: https://monktv.glide.page"
     )
     sent = await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-    context.job_queue.run_once(delete_message_after_delay, when=43200, data=sent.message_id, chat_id=sent.chat_id)
+    context.job_queue.run_once(delete_message_after_delay, when=720, data=sent.message_id, chat_id=sent.chat_id)
+
+# /ping command
+async def ping(update: Update, context: CallbackContext):
+    sent = await update.message.reply_text("✅ Bot is alive!")
+    context.job_queue.run_once(delete_message_after_delay, when=720, data=sent.message_id, chat_id=sent.chat_id)
 
 # Handle search
 async def handle_message(update: Update, context: CallbackContext):
     query = update.message.text.strip()
     results = search_movies(query)
-    
+
     if results:
-        for movie in results[:5]:  # Limit to 5
+        for movie in results[:5]:
             msg = f"{EMOJI_MOVIE} *{movie['Title']}*\n{EMOJI_SEARCH} [Watch Now]({movie['Link']})"
             sent = await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-            context.job_queue.run_once(delete_message_after_delay, when=43200, data=sent.message_id, chat_id=sent.chat_id)
+            context.job_queue.run_once(delete_message_after_delay, when=720, data=sent.message_id, chat_id=sent.chat_id)
     else:
         sent = await update.message.reply_text(f"{EMOJI_NO_MATCH} No match found for *{query}*", parse_mode=ParseMode.MARKDOWN)
-        context.job_queue.run_once(delete_message_after_delay, when=43200, data=sent.message_id, chat_id=sent.chat_id)
+        context.job_queue.run_once(delete_message_after_delay, when=720, data=sent.message_id, chat_id=sent.chat_id)
 
-# Telegram webhook
+# Webhook handler
 @app.post("/telegram")
 async def telegram_webhook(req: Request):
     data = await req.json()
@@ -99,7 +115,7 @@ async def telegram_webhook(req: Request):
     await telegram_app.process_update(update)
     return {"ok": True}
 
-# FastAPI lifespan for bot setup
+# Lifespan: Start Telegram application
 @app.on_event("startup")
 async def on_startup():
     global telegram_app
@@ -109,6 +125,7 @@ async def on_startup():
         .build()
     )
     telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(CommandHandler("ping", ping))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Set webhook
