@@ -62,8 +62,8 @@ async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("🚫 No match found. Try something else?")
         context.job_queue.run_once(delete_message_after_delay, 43200, data=msg.message_id, chat_id=msg.chat_id)
 
+# ✅ Updated safe delete function
 async def delete_message_after_delay(context: CallbackContext):
-    await asyncio.sleep(43200)
     try:
         await context.bot.delete_message(
             chat_id=context.job.chat_id,
