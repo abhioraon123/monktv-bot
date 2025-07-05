@@ -87,6 +87,7 @@ async def on_shutdown():
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
+    print("🔔 Incoming update:", data)
     update = Update.de_json(data, application.bot)
     await application.process_update(update)
     return {"ok": True}
