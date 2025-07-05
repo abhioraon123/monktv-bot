@@ -3,72 +3,89 @@ import logging
 import json
 import gspread
 from fastapi import FastAPI, Request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, Bot
+from telegram.constants import ParseMode
 from telegram.ext import (
-    Application, CommandHandler, ContextTypes, MessageHandler, filters
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
 )
 
-# Logging setup
+# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bot")
 
-# Load environment variables
+# Environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
 SPREADSHEET_ID = "1K-Nuv4dB8_MPBvk-Jc4Qr_Haa4nW6Z8z2kbfUemYe1U"
 
-# Google Sheets setup
-try:
-    creds_dict = json.loads(GOOGLE_CREDS_JSON)
-    gc = gspread.service_account_from_dict(creds_dict)
-    sh = gc.open_by_key(SPREADSHEET_ID)
-    worksheet = sh.sheet1
-    logger.info("✅ Connected to Google Sheet")
-except Exception as e:
-    logger.error(f"❌ Google Sheets Error: {e}")
-    raise e
+# Google Sheet
+gc = gspread.service_account_from_dict(json.loads(GOOGLE_CREDS_JSON))
+sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+logger.info("✅ Connected to Google Sheet")
 
 # FastAPI app
 app = FastAPI()
+telegram_app = None  # PTB app will be set in startup
 
-# Telegram App setup
-telegram_app = Application.builder().token(BOT_TOKEN).build()
+# Emoji constants
+EMOJI_MOVIE = "🎥"
+EMOJI_SEARCH = "🔎"
+EMOJI_SITE = "📺"
+EMOJI_NO_MATCH = "🚫"
 
-# 📌 Start command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🎥 Movies", url="https://t.me/monktvclub")],
-        [InlineKeyboardButton("📺 Website", url="https://monktv.glide.page")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Welcome to MonkTV! 🍿", reply_markup=reply_markup)
-
-# 📌 Message handler
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.strip().lower()
-    rows = worksheet.get_all_records()
+# Movie search function
+def search_movies(query):
+    rows = sheet.get_all_records()
+    results = []
+    query = query.lower()
     for row in rows:
-        if query in row["Name"].lower():
-            reply = f"🎬 *{row['Name']}*\n\n🔗 {row['Link']}"
-            await update.message.reply_text(reply, parse_mode="Markdown")
-            return
-    await update.message.reply_text("🚫 No match found.")
+        title = str(row.get("Title", "")).lower()
+        if query in title:
+            results.append(row)
+    return results
 
-# Add handlers
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+# /start command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = (
+        "👋 *Welcome to MonkTV Bot!*\n\n"
+        f"{EMOJI_MOVIE} Send a movie name to search.\n"
+        f"{EMOJI_SITE} Visit: https://monktv.glide.page"
+    )
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
-# 🚀 Webhook endpoint
-@app.post("/")
-async def telegram_webhook(request: Request):
-    update_dict = await request.json()
-    update = Update.de_json(update_dict, telegram_app.bot)
+# Message handler
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.strip()
+    results = search_movies(query)
+    
+    if results:
+        for movie in results[:5]:  # limit to 5 results
+            msg = f"{EMOJI_MOVIE} *{movie['Title']}*\n{EMOJI_SEARCH} [Watch Now]({movie['Link']})"
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(f"{EMOJI_NO_MATCH} No match found for *{query}*", parse_mode=ParseMode.MARKDOWN)
+
+# Telegram webhook endpoint
+@app.post("/telegram")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    update = Update.de_json(data, Bot(BOT_TOKEN))
     await telegram_app.process_update(update)
     return {"ok": True}
 
-# 🌀 Startup hook for webhook
+# On startup: initialize bot
 @app.on_event("startup")
 async def on_startup():
-    await telegram_app.bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"🚀 Webhook set to: {WEBHOOK_URL}")
+    global telegram_app
+    telegram_app = Application.builder().token(BOT_TOKEN).build()
+
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/telegram")
+    logger.info(f"✅ Webhook set to {WEBHOOK_URL}/telegram")
