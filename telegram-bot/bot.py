@@ -84,7 +84,7 @@ async def on_shutdown():
     await application.shutdown()
 
 # 📬 Webhook endpoint for Telegram
-@app.post("/")
+@app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update.de_json(data, application.bot)
