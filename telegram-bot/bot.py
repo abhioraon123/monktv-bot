@@ -33,17 +33,31 @@ sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global application
-    application = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    await application.initialize()
-    await application.start()
-    await application.bot.set_webhook(f"{WEBHOOK_URL}/telegram/webhook")
+    try:
+        print("🚀 [lifespan] Starting bot initialization...")
+        application = (
+            ApplicationBuilder()
+            .token(BOT_TOKEN)
+            .build()
+        )
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+        await application.initialize()
+        print("✅ [lifespan] Application initialized.")
+
+        await application.start()
+        print("✅ [lifespan] Application started.")
+
+        await application.bot.set_webhook(f"{WEBHOOK_URL}/telegram/webhook")
+        print(f"✅ [lifespan] Webhook set to {WEBHOOK_URL}/telegram/webhook")
+
+    except Exception as e:
+        print(f"❌ [lifespan] Bot setup failed: {e}")
+
     yield
+
+    print("🔻 [lifespan] Shutting down bot...")
     await application.stop()
     await application.shutdown()
 
