@@ -6,6 +6,7 @@ import gspread
 from fastapi import FastAPI, Request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
@@ -27,7 +28,7 @@ SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
 # FastAPI app
 app = FastAPI()
-telegram_app = None
+telegram_app: Application = None
 sheet = None
 
 # /start command
@@ -40,7 +41,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     context.job_queue.run_once(delete_message_after_delay, 43200, data=msg.message_id, chat_id=msg.chat_id)
 
-# Search query handler
+# Query search
 async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.lower()
     data = sheet.get_all_values()
@@ -53,8 +54,7 @@ async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if found:
         for row in found:
-            title = row[0]
-            link = row[1]
+            title, link = row[0], row[1]
             msg = await update.message.reply_text(
                 f"🎥 <b>{title}</b>\n👉 <a href='{link}'>Watch Now</a>",
                 parse_mode=ParseMode.HTML
@@ -64,9 +64,9 @@ async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("🚫 No match found. Try something else?")
         context.job_queue.run_once(delete_message_after_delay, 43200, data=msg.message_id, chat_id=msg.chat_id)
 
-# Safe delete message
+# Delete message after delay
 async def delete_message_after_delay(context: ContextTypes.DEFAULT_TYPE):
-    await asyncio.sleep(43200)  # Wait 12 hours
+    await asyncio.sleep(43200)
     try:
         await context.bot.delete_message(
             chat_id=context.job.chat_id,
@@ -74,15 +74,15 @@ async def delete_message_after_delay(context: ContextTypes.DEFAULT_TYPE):
         )
     except BadRequest as e:
         if "message can't be deleted" in str(e):
-            pass  # ignore silently
+            pass
         else:
             logger.warning(f"Telegram BadRequest: {e}")
     except Exception as e:
         logger.error(f"Unexpected error while deleting message: {e}")
 
-# FastAPI startup
+# Startup & shutdown using FastAPI lifespan
 @app.on_event("startup")
-async def startup():
+async def on_startup():
     global telegram_app, sheet
 
     try:
@@ -96,6 +96,7 @@ async def startup():
         raise
 
     telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_query))
 
@@ -104,15 +105,14 @@ async def startup():
     await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/telegram")
     logger.info(f"✅ Webhook set to {WEBHOOK_URL}/telegram")
 
-# FastAPI shutdown
 @app.on_event("shutdown")
-async def shutdown():
+async def on_shutdown():
     await telegram_app.bot.delete_webhook()
     await telegram_app.stop()
     await telegram_app.shutdown()
     logger.info("🛑 Bot shut down cleanly")
 
-# Webhook endpoint
+# Webhook route
 @app.post("/telegram")
 async def telegram_webhook(req: Request):
     data = await req.json()
