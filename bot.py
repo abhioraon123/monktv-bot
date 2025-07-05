@@ -1,19 +1,20 @@
 import os
 import json
+import asyncio
 import logging
 import gspread
-from io import StringIO
 from fastapi import FastAPI, Request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    CallbackContext,
     ContextTypes,
+    CallbackContext,
     filters,
 )
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +30,7 @@ app = FastAPI()
 telegram_app = None
 sheet = None
 
-# /start command handler
+# /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("📺 Visit Website", url="https://monktv.glide.page")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -37,13 +38,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Hey there! 👋\nSend me the name of the movie or topic you're looking for 🎥",
         reply_markup=reply_markup
     )
-    context.job_queue.run_once(delete_message, 43200, data={"chat_id": msg.chat_id, "message_id": msg.message_id})
+    context.job_queue.run_once(delete_message_after_delay, 43200, data=msg.message_id, chat_id=msg.chat_id)
 
-# Handle search queries
+# Search query handler
 async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.lower()
     data = sheet.get_all_values()
-    header = data[0]
     rows = data[1:]
 
     found = []
@@ -59,36 +59,42 @@ async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🎥 <b>{title}</b>\n👉 <a href='{link}'>Watch Now</a>",
                 parse_mode=ParseMode.HTML
             )
-            context.job_queue.run_once(delete_message, 43200, data={"chat_id": msg.chat_id, "message_id": msg.message_id})
+            context.job_queue.run_once(delete_message_after_delay, 43200, data=msg.message_id, chat_id=msg.chat_id)
     else:
         msg = await update.message.reply_text("🚫 No match found. Try something else?")
-        context.job_queue.run_once(delete_message, 43200, data={"chat_id": msg.chat_id, "message_id": msg.message_id})
+        context.job_queue.run_once(delete_message_after_delay, 43200, data=msg.message_id, chat_id=msg.chat_id)
 
-# Auto-delete messages after 12 hours
-async def delete_message(context: CallbackContext):
-    job_data = context.job.data
+# Safe delete message
+async def delete_message_after_delay(context: ContextTypes.DEFAULT_TYPE):
+    await asyncio.sleep(43200)  # Wait 12 hours
     try:
-        await context.bot.delete_message(chat_id=job_data["chat_id"], message_id=job_data["message_id"])
+        await context.bot.delete_message(
+            chat_id=context.job.chat_id,
+            message_id=context.job.data
+        )
+    except BadRequest as e:
+        if "message can't be deleted" in str(e):
+            pass  # ignore silently
+        else:
+            logger.warning(f"Telegram BadRequest: {e}")
     except Exception as e:
-        logger.warning(f"⚠️ Failed to delete message: {e}")
+        logger.error(f"Unexpected error while deleting message: {e}")
 
 # FastAPI startup
 @app.on_event("startup")
 async def startup():
     global telegram_app, sheet
 
-    # Load Google Sheet
     try:
         creds_json = os.getenv("GOOGLE_CREDS_JSON")
         creds_dict = json.loads(creds_json)
         gc = gspread.service_account_from_dict(creds_dict)
         sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
-        logger.info("✅ Successfully connected to Google Sheet")
+        logger.info("✅ Connected to Google Sheet")
     except Exception as e:
         logger.error(f"❌ Failed to connect to Google Sheet: {e}")
         raise
 
-    # Start Telegram application
     telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_query))
@@ -96,6 +102,7 @@ async def startup():
     await telegram_app.initialize()
     await telegram_app.start()
     await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/telegram")
+    logger.info(f"✅ Webhook set to {WEBHOOK_URL}/telegram")
 
 # FastAPI shutdown
 @app.on_event("shutdown")
@@ -103,8 +110,9 @@ async def shutdown():
     await telegram_app.bot.delete_webhook()
     await telegram_app.stop()
     await telegram_app.shutdown()
+    logger.info("🛑 Bot shut down cleanly")
 
-# Telegram webhook endpoint
+# Webhook endpoint
 @app.post("/telegram")
 async def telegram_webhook(req: Request):
     data = await req.json()
