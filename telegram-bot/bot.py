@@ -1,80 +1,92 @@
 import os
 import json
+import logging
 import gspread
 from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
+    MessageHandler,
+    filters,
 )
+from telegram.constants import ParseMode
 
-# Load environment variables
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
+# 🧠 Logging for debugging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 🔐 Load environment variables
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+WEBHOOK_URL = os.environ["WEBHOOK_URL"]
+GOOGLE_CREDS_JSON = os.environ["GOOGLE_CREDS_JSON"]
 SPREADSHEET_ID = "1K-Nuv4dB8_MPBvk-Jc4Qr_Haa4nW6Z8z2kbfUemYe1U"
 
-# Google Sheets setup
+# ⚙️ Create FastAPI app
+app = FastAPI()
+
+# 📊 Connect to Google Sheets
 creds_dict = json.loads(GOOGLE_CREDS_JSON)
 gc = gspread.service_account_from_dict(creds_dict)
 sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
 
-# FastAPI app
-app = FastAPI()
-
-# Telegram bot app
-telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-
-# 🟡 Start command handler
+# 🧾 /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome to MonkTV Bot!\n\n"
-        "Send me a keyword and I’ll fetch study materials for you! 🔍"
+        "🔎 Just type any movie or category name to search.\n"
+        "📺 Also visit: https://monktv.glide.page"
     )
 
-
-# 🟢 Main search handler
+# 🔎 Search handler
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.lower()
-    records = sheet.get_all_records()
+    query = update.message.text.strip().lower()
+    data = sheet.get_all_records()
 
-    matches = []
-    for row in records:
-        if query in row["name"].lower():
-            matches.append(f'🎥 {row["name"]} - {row["link"]}')
+    results = [
+        row for row in data
+        if query in row.get("Name", "").lower() or query in row.get("Category", "").lower()
+    ]
 
-    if matches:
-        reply = "\n\n".join(matches)
+    if results:
+        for row in results[:5]:  # Show only top 5 matches
+            name = row.get("Name", "No Title")
+            link = row.get("Link", "No Link")
+            text = f"🎥 <b>{name}</b>\n🔗 <a href='{link}'>Watch Now</a>"
+            await update.message.reply_html(text, disable_web_page_preview=True)
     else:
-        reply = "🚫 No match found. Try different keywords."
+        await update.message.reply_text("🚫 No match found.")
 
-    await update.message.reply_text(reply)
-
-
-# Register handlers
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-
-# ✅ Set webhook when app starts
+# 🚀 Webhook setup on bot startup
 @app.on_event("startup")
 async def on_startup():
-    await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
-    print("✅ Webhook set")
+    global application
+    application = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .post_init(set_webhook)
+        .build()
+    )
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    await application.initialize()
+    await application.start()
 
+# 🧠 Webhook registration
+async def set_webhook(app):
+    await app.bot.set_webhook(WEBHOOK_URL)
 
-# ❌ Remove webhook on shutdown
+# 📴 Graceful shutdown
 @app.on_event("shutdown")
 async def on_shutdown():
-    await telegram_app.bot.delete_webhook()
-    print("🛑 Webhook deleted")
+    await application.stop()
+    await application.shutdown()
 
-
-# 📬 Telegram webhook endpoint
-@app.post("/webhook")
+# 📬 Webhook endpoint for Telegram
+@app.post("/")
 async def telegram_webhook(request: Request):
     data = await request.json()
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
+    update = Update.de_json(data, application.bot)
+    await application.process_update(update)
     return {"ok": True}
