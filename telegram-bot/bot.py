@@ -14,6 +14,8 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
+application = None  # 🧠 Define application globally so it's accessible everywhere
+
 # 🧠 Logging for debugging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
