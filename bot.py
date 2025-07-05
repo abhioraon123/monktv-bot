@@ -1,121 +1,210 @@
-<<<<<<< HEAD
-import nest_asyncio
-nest_asyncio.apply()
-
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-from googleapiclient.discovery import build
-from google.oauth2 import service_account
-
-# Enable logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Google Sheets setup
-SERVICE_ACCOUNT_FILE = 'credentials.json'
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
-SPREADSHEET_ID = '1K-Nuv4dB8_MPBvk-Jc4Qr_Haa4nW6Z8z2kbfUemYe1U'
-RANGE_NAME = 'monktv!A2:C'  # Skip the header row
-
-# Authorize Sheets
-creds = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES
-)
-sheet = build('sheets', 'v4', credentials=creds).spreadsheets()
-
-# Bot handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎬 Welcome! Send a title to get its 720p/1080p links.")
-
-async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.lower()
-    result = sheet.values().get(spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME).execute()
-    values = result.get('values', [])
-
-    for row in values:
-        title = row[0].lower() if len(row) > 0 else ""
-        if query in title:
-            title_text = f"🎬 *{row[0]}*"
-            link_720 = f"🔹 720p: {row[1]}" if len(row) > 1 and row[1] else ""
-            link_1080 = f"🔹 1080p: {row[2]}" if len(row) > 2 and row[2] else ""
-            message = "\n".join(filter(None, [title_text, link_720, link_1080]))
-            await update.message.reply_text(message, parse_mode="Markdown")
-            return
-    await update.message.reply_text("❌ Title not found.")
-
-# Main runner
-async def main():
-    app = ApplicationBuilder().token("7346055162:AAEpJC6HWmnG3sywQtBw_b3-TRqM6Ka0AkA").build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))
-    print("Bot is running...")
-    await app.run_polling()
-
-if __name__ == "__main__":
-    import asyncio
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
-=======
 import os
 import json
 import logging
 import gspread
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
+from contextlib import asynccontextmanager
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    ContextTypes,
-    CommandHandler,
-    MessageHandler,
-    filters,
-)
-from telegram.constants import ParseMode
+from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
 
-# 🧠 Logging for debugging
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# 🔐 Load environment variables
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-WEBHOOK_URL = os.environ["WEBHOOK_URL"]
-GOOGLE_CREDS_JSON = os.environ["GOOGLE_CREDS_JSON"]
-SPREADSHEET_ID = "1K-Nuv4dB8_MPBvk-Jc4Qr_Haa4nW6Z8z2kbfUemYe1U"
+# Global variables
+application = None
+worksheet = None
 
-# ⚙️ Create FastAPI app
-app = FastAPI()
+def load_environment_variables():
+    """Load and validate environment variables"""
+    try:
+        required_vars = ['BOT_TOKEN', 'WEBHOOK_URL', 'GOOGLE_CREDS_JSON']
+        for var in required_vars:
+            if not os.getenv(var):
+                raise ValueError(f"❌ Missing required environment variable: {var}")
+        
+        logger.info("✅ Environment variables loaded successfully")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Environment setup failed: {e}")
+        return False
 
-# 📊 Connect to Google Sheets
-creds_dict = json.loads(GOOGLE_CREDS_JSON)
-gc = gspread.service_account_from_dict(creds_dict)
-sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+def setup_google_sheets():
+    """Setup Google Sheets connection"""
+    global worksheet
+    try:
+        google_creds = json.loads(os.getenv('GOOGLE_CREDS_JSON'))
+        gc = gspread.service_account_from_dict(google_creds)
+        worksheet = gc.open("MonkTV Search Results").sheet1
+        logger.info("✅ Google Sheets connected successfully")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Google Sheets setup failed: {e}")
+        return False
 
-# 🧾 /start command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "\U0001F44B Welcome to MonkTV Bot!\n\n"
-        "\U0001F50E Just type any movie or category name to search.\n"
-        "\U0001F4FA Also visit: https://monktv.glide.page"
-    )
+def search_google_sheets(query: str) -> str:
+    """Search Google Sheets for the query"""
+    try:
+        if not worksheet:
+            return "❌ Google Sheets not connected"
+        
+        # Get all records
+        records = worksheet.get_all_records()
+        
+        # Filter records that match the query
+        matching_records = []
+        for record in records:
+            # Check if query matches in any field
+            for key, value in record.items():
+                if query.lower() in str(value).lower():
+                    matching_records.append(record)
+                    break
+        
+        if not matching_records:
+            return f"❌ No results found for '{query}'"
+        
+        # Format results
+        result_text = f"🔍 Search Results for '{query}':\n\n"
+        for i, record in enumerate(matching_records[:5], 1):  # Limit to 5 results
+            result_text += f"{i}. "
+            for key, value in record.items():
+                if value:  # Only show non-empty values
+                    result_text += f"{key}: {value} | "
+            result_text = result_text.rstrip(" | ") + "\n\n"
+        
+        return result_text
+    except Exception as e:
+        logger.error(f"❌ Search failed: {e}")
+        return f"❌ Search error: {str(e)}"
 
-# 🔎 Search handler
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command"""
+    try:
+        await update.message.reply_text(
+            "🤖 Welcome to MonkTV Search Bot!\n\n"
+            "Use /search <query> to search our database.\n"
+            "Example: /search your query here"
+        )
+    except Exception as e:
+        logger.error(f"❌ Start command failed: {e}")
+
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /search command"""
+    try:
+        if not context.args:
+            await update.message.reply_text("❌ Please provide a search query.\nExample: /search your query")
+            return
+        
+        query = ' '.join(context.args)
+        logger.info(f"🔍 Searching for: {query}")
+        
+        # Search Google Sheets
+        result = search_google_sheets(query)
+        
+        # Send result
+        await update.message.reply_text(result)
+        
+    except Exception as e:
+        logger.error(f"❌ Search command failed: {e}")
+        await update.message.reply_text(f"❌ Search failed: {str(e)}")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.strip().lower()
-    data = sheet.get_all_records()
+    """Handle regular messages"""
+    try:
+        message = update.message.text
+        logger.info(f"📨 Received message: {message}")
+        
+        # If message doesn't start with /, treat as search
+        if not message.startswith('/'):
+            result = search_google_sheets(message)
+            await update.message.reply_text(result)
+        else:
+            await update.message.reply_text("❌ Unknown command. Use /search <query> to search.")
+            
+    except Exception as e:
+        logger.error(f"❌ Message handling failed: {e}")
 
-    results = [
-        row for row in data
-        if query in row.get("Name", "").lower() or query in row.get("Category", "").lower()
-    ]
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan"""
+    global application
+    
+    try:
+        # Load environment variables
+        if not load_environment_variables():
+            raise Exception("Environment setup failed")
+        
+        # Setup Google Sheets
+        if not setup_google_sheets():
+            raise Exception("Google Sheets setup failed")
+        
+        # Initialize bot
+        logger.info("🚀 Starting bot initialization...")
+        
+        application = (
+            Application.builder()
+            .token(os.getenv('BOT_TOKEN'))
+            .build()
+        )
+        
+        # Add handlers
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("search", search_command))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        
+        # Initialize application
+        await application.initialize()
+        
+        # Set webhook
+        webhook_url = f"{os.getenv('WEBHOOK_URL')}/telegram/webhook"
+        await application.bot.set_webhook(webhook_url)
+        
+        logger.info("✅ Bot initialized successfully")
+        
+        yield
+        
+    except Exception as e:
+        logger.error(f"❌ Bot setup failed: {e}")
+        raise
+    finally:
+        # Cleanup
+        if application:
+            await application.shutdown()
 
-    if results:
-        for row in results[:5]:  # Show only top 5 matches
-            name = row.get("Name", "No Title")
-            link = row.get("Link", "No Link")
-            text = f"\U0001F3A5 <b>{name}</b>\n\U0001F517 <a href='{link}'>Watch Now</a>"
-            await update.message.reply_html(text, disable_web_page_preview=True)
-    else:
-        await update.message.reply_text("\u274C No match found.")
+# Create FastAPI app
+app = FastAPI(lifespan=lifespan)
 
-# 
->>>>>>> 56db08aa54cf4211e1bc41bb89de92c65ebcaf0b
+@app.get("/")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "message": "MonkTV Bot is running"}
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request):
+    """Handle Telegram webhooks"""
+    try:
+        if not application:
+            logger.error("❌ Application not initialized")
+            raise HTTPException(status_code=500, detail="Bot not initialized")
+        
+        # Get update data
+        data = await request.json()
+        
+        # Create update object
+        update = Update.de_json(data, application.bot)
+        
+        # Process update
+        await application.process_update(update)
+        
+        return {"status": "ok"}
+        
+    except Exception as e:
+        logger.error(f"❌ Webhook error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
