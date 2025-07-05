@@ -36,11 +36,66 @@ def setup_google_sheets():
     """Setup Google Sheets connection"""
     global worksheet
     try:
-        google_creds = json.loads(os.getenv('GOOGLE_CREDS_JSON'))
+        # Parse Google credentials
+        google_creds_json = os.getenv('GOOGLE_CREDS_JSON')
+        logger.info(f"📝 GOOGLE_CREDS_JSON length: {len(google_creds_json) if google_creds_json else 'None'}")
+        
+        if not google_creds_json:
+            raise ValueError("GOOGLE_CREDS_JSON is empty")
+        
+        # Try to parse JSON
+        try:
+            google_creds = json.loads(google_creds_json)
+            logger.info("✅ Google credentials JSON parsed successfully")
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Invalid JSON in GOOGLE_CREDS_JSON: {e}")
+            raise ValueError(f"Invalid JSON in GOOGLE_CREDS_JSON: {e}")
+        
+        # Check if required fields are present
+        required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id', 'auth_uri', 'token_uri']
+        missing_fields = [field for field in required_fields if field not in google_creds]
+        if missing_fields:
+            logger.error(f"❌ Missing required fields in Google credentials: {missing_fields}")
+            raise ValueError(f"Missing required fields in Google credentials: {missing_fields}")
+        
+        # Create gspread client
         gc = gspread.service_account_from_dict(google_creds)
-        worksheet = gc.open("MonkTV Search Results").sheet1
+        logger.info("✅ Google service account created successfully")
+        
+        # Try to open the spreadsheet
+        sheet_name = "sheet1"
+        try:
+            spreadsheet = gc.open(sheet_name)
+            logger.info(f"✅ Spreadsheet '{sheet_name}' opened successfully")
+        except gspread.SpreadsheetNotFound:
+            logger.error(f"❌ Spreadsheet '{sheet_name}' not found")
+            # List available spreadsheets
+            try:
+                sheets = gc.list_spreadsheet_files()
+                logger.info(f"📋 Available spreadsheets: {[s['name'] for s in sheets]}")
+            except Exception as list_error:
+                logger.error(f"❌ Could not list spreadsheets: {list_error}")
+            raise ValueError(f"Spreadsheet '{sheet_name}' not found. Make sure the service account has access to it.")
+        except Exception as e:
+            logger.error(f"❌ Error opening spreadsheet: {e}")
+            raise ValueError(f"Error opening spreadsheet: {e}")
+        
+        # Get the first worksheet
+        try:
+            worksheet = spreadsheet.sheet1
+            logger.info("✅ Worksheet accessed successfully")
+            
+            # Test reading from the sheet
+            test_data = worksheet.get_all_records(limit=1)
+            logger.info(f"✅ Sheet test read successful. Sample data: {test_data}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error accessing worksheet: {e}")
+            raise ValueError(f"Error accessing worksheet: {e}")
+        
         logger.info("✅ Google Sheets connected successfully")
         return True
+        
     except Exception as e:
         logger.error(f"❌ Google Sheets setup failed: {e}")
         return False
